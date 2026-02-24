@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Navy Shuttle System</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: auto; padding: 20px; }
+    button { padding: 6px; margin: 5px 0; width: 100%; cursor: pointer; }
+    input { padding: 6px; margin: 5px 0; width: 100%; }
+    .card { border: 1px solid #ccc; padding: 15px; margin: 15px 0; border-radius: 6px; }
+    .hidden { display: none; }
+    .full { background-color: #ffe6e6; }
+  </style>
+</head>
+<body>
+
+<h1>🚐 Navy Shuttle System</h1>
+
+<button onclick="showRider()">Rider View</button>
+<button onclick="showDriver()">Driver Login</button>
+
+<!-- ================= RIDER SECTION ================= -->
+<div id="riderSection">
+
+<h2>Request a Ride</h2>
+<input id="rName" placeholder="Your Name">
+<input id="rPickup" placeholder="Pickup Location">
+<input id="rTime" placeholder="Time (0700)">
+<button onclick="requestRide()">Submit Request</button>
+
+<h2>Scheduled Rides</h2>
+<div id="rides"></div>
+
+</div>
+
+<!-- ================= DRIVER LOGIN ================= -->
+<div id="driverLogin" class="hidden">
+<h2>Driver Login</h2>
+<input type="password" id="driverPass" placeholder="Driver Password">
+<button onclick="loginDriver()">Login</button>
+</div>
+
+<!-- ================= DRIVER SECTION ================= -->
+<div id="driverSection" class="hidden">
+
+<h2>Create Ride</h2>
+<input id="dName" placeholder="Driver Name">
+<input id="dPickup" placeholder="Pickup Location">
+<input id="dTime" placeholder="Time (0700)">
+<input id="dSeats" type="number" placeholder="Number of Seats">
+<button onclick="createRide()">Create Ride</button>
+
+<h2>Pending / Assigned Ride Requests</h2>
+<div id="requests"></div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { 
+  getFirestore, collection, addDoc, updateDoc, doc,
+  onSnapshot, deleteDoc, getDoc
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+/* ====== PASTE YOUR FIREBASE CONFIG ====== */
+const firebaseConfig = {
+  apiKey: "PASTE_KEY_HERE",
+  authDomain: "PASTE_AUTH_DOMAIN",
+  projectId: "PASTE_PROJECT_ID",
+  storageBucket: "PASTE_BUCKET",
+  messagingSenderId: "PASTE_ID",
+  appId: "PASTE_APP_ID"
+};
+/* ======================================== */
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* ===== VIEW SWITCHING ===== */
+window.showRider = function() {
+  riderSection.classList.remove("hidden");
+  driverLogin.classList.add("hidden");
+  driverSection.classList.add("hidden");
+};
+
+window.showDriver = function() {
+  riderSection.classList.add("hidden");
+  driverLogin.classList.remove("hidden");
+};
+
+window.loginDriver = function() {
+  if (driverPass.value === "navy123") {  // Change password as needed
+    driverLogin.classList.add("hidden");
+    driverSection.classList.remove("hidden");
+  } else {
+    alert("Incorrect Password");
+  }
+};
+
+/* ===== RIDER REQUEST RIDE ===== */
+window.requestRide = async function() {
+  await addDoc(collection(db, "rides"), {
+    driver: "Pending Assignment",
+    pickup: rPickup.value,
+    time: rTime.value,
+    seats: 10,
+    passengers: [rName.value]
+  });
+  rName.value = "";
+  rPickup.value = "";
+  rTime.value = "";
+};
+
+/* ===== DRIVER CREATE RIDE ===== */
+window.createRide = async function() {
+  await addDoc(collection(db, "rides"), {
+    driver: dName.value,
+    pickup: dPickup.value,
+    time: dTime.value,
+    seats: parseInt(dSeats.value),
+    passengers: []
+  });
+  dName.value = "";
+  dPickup.value = "";
+  dTime.value = "";
+  dSeats.value = "";
+};
+
+/* ===== BOOK SEAT ===== */
+window.bookRide = async function(id, seats, passengers) {
+  if (passengers.length >= seats) {
+    alert("No seats available");
+    return;
+  }
+  const name = prompt("Enter your name:");
+  if (!name) return;
+  if (passengers.includes(name)) {
+    alert("You are already on this ride.");
+    return;
+  }
+  const rideRef = doc(db, "rides", id);
+  await updateDoc(rideRef, { passengers: [...passengers, name] });
+};
+
+/* ===== CANCEL RIDER FROM RIDE ===== */
+window.cancelRide = async function(id) {
+  const name = prompt("Enter your name to cancel:");
+  if (!name) return;
+  const rideRef = doc(db, "rides", id);
+  const rideSnap = await getDoc(rideRef);
+  if (!rideSnap.exists()) return;
+  const rideData = rideSnap.data();
+  const updatedPassengers = rideData.passengers.filter(p => p !== name);
+  await updateDoc(rideRef, { passengers: updatedPassengers });
+};
+
+/* ===== DRIVER CANCEL ENTIRE RIDE ===== */
+window.deleteRide = async function(id) {
+  const confirmDelete = confirm("Are you sure you want to cancel this ride?");
+  if (!confirmDelete) return;
+  const rideRef = doc(db, "rides", id);
+  await deleteDoc(rideRef);
+};
+
+/* ===== ASSIGN DRIVER ===== */
+window.assignDriver = async function(id) {
+  const name = prompt("Enter Your Driver Name:");
+  if (!name) return;
+  const rideRef = doc(db, "rides", id);
+  await updateDoc(rideRef, { driver: name });
+};
+
+/* ===== REAL-TIME LISTENER ===== */
+onSnapshot(collection(db, "rides"), snapshot => {
+  rides.innerHTML = "";
+  requests.innerHTML = "";
+
+  snapshot.forEach(docSnap => {
+    const ride = docSnap.data();
+    const rideId = docSnap.id;
+    const available = ride.seats - ride.passengers.length;
+    const isFull = available <= 0;
+
+    // Rider view
+    rides.innerHTML += `
+      <div class="card ${isFull ? 'full' : ''}">
+        <strong>Driver:</strong> ${ride.driver}<br>
+        <strong>Pickup:</strong> ${ride.pickup}<br>
+        <strong>Time:</strong> ${ride.time}<br>
+        <strong>Seats Available:</strong> ${available}<br>
+        <strong>Passengers:</strong> ${ride.passengers.join(", ")}<br>
+        ${!isFull && ride.driver !== "Pending Assignment" ? 
+          `<button onclick='bookRide("${rideId}", ${ride.seats}, ${JSON.stringify(ride.passengers)})'>Take Seat</button>` : ""}
+        <button onclick='cancelRide("${rideId}")'>Cancel My Ride</button>
+      </div>
+    `;
+
+    // Driver view for pending rides
+    if (!driverSection.classList.contains("hidden")) {
+      if (ride.driver === "Pending Assignment") {
+        requests.innerHTML += `
+          <div class="card">
+            <strong>Pickup:</strong> ${ride.pickup}<br>
+            <strong>Time:</strong> ${ride.time}<br>
+            <button onclick='assignDriver("${rideId}")'>Assign Me</button>
+            <button onclick='deleteRide("${rideId}")'>Cancel Ride</button>
+          </div>
+        `;
+      } else if (ride.driver !== "Pending Assignment") {
+        requests.innerHTML += `
+          <div class="card">
+            <strong>Driver:</strong> ${ride.driver}<br>
+            <strong>Pickup:</strong> ${ride.pickup}<br>
+            <strong>Time:</strong> ${ride.time}<br>
+            <button onclick='deleteRide("${rideId}")'>Cancel Ride</button>
+          </div>
+        `;
+      }
+    }
+
+  });
+});
+</script>
+
+</body>
+</html>
